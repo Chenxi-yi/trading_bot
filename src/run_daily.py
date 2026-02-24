@@ -124,12 +124,25 @@ def run_market(market: str, symbols: list[str], cfg: dict):
             continue
 
     if not rows:
-        return pd.DataFrame(), liquid_top_n, len(liquid_syms)
+        return pd.DataFrame(), pd.DataFrame(), liquid_top_n, len(liquid_syms)
 
     out = pd.DataFrame(rows)
-    out = out[(out["eligible"]) & (out["rule_1_breakout"]) & (out["rule_2_volume"]) & (out["rule_3_hold_above"]) & (out["rule_4_macd"])]
-    out = out.sort_values(["score", "symbol"], ascending=[False, True]).head(mcfg["top_n"]).reset_index(drop=True)
-    return out, liquid_top_n, len(liquid_syms)
+
+    # A档：保持严格版（原规则不变）
+    a_tier = out[
+        (out["eligible"])
+        & (out["rule_1_breakout"])
+        & (out["rule_2_volume"])
+        & (out["rule_3_hold_above"])
+        & (out["rule_4_macd"])
+    ].sort_values(["score", "symbol"], ascending=[False, True]).head(mcfg["top_n"]).reset_index(drop=True)
+
+    # B档：必须满足 主触发 + 量能确认，其余按得分排序
+    b_tier = out[
+        (out["rule_1_breakout"]) & (out["rule_2_volume"])
+    ].sort_values(["score", "symbol"], ascending=[False, True]).head(mcfg["top_n"]).reset_index(drop=True)
+
+    return a_tier, b_tier, liquid_top_n, len(liquid_syms)
 
 
 def to_line(r: pd.Series):
@@ -155,21 +168,33 @@ def main():
     us_symbols = get_us_universe(cfg["markets"]["us"]["max_symbols"])
     hk_symbols = get_hk_universe(cfg["markets"]["hk"]["max_symbols"])
 
-    us, us_topn, us_used = run_market("us", us_symbols, cfg)
-    hk, hk_topn, hk_used = run_market("hk", hk_symbols, cfg)
+    us_a, us_b, us_topn, us_used = run_market("us", us_symbols, cfg)
+    hk_a, hk_b, hk_topn, hk_used = run_market("hk", hk_symbols, cfg)
 
     now = datetime.now().strftime("%Y-%m-%d")
-    report_md = [f"# 【策略日报】{now} {cfg['report_time']}", "", "## 港股 Top5"]
-    if hk.empty:
-        report_md.append("- 今日无满足全部主+辅条件的港股标的")
+    report_md = [f"# 【策略日报】{now} {cfg['report_time']}", "", "## 港股 A档 Top5（主触发+量能+其余严格条件）"]
+    if hk_a.empty:
+        report_md.append("- 今日无满足A档条件的港股标的")
     else:
-        report_md += [to_line(r) for _, r in hk.iterrows()]
+        report_md += [to_line(r) for _, r in hk_a.iterrows()]
 
-    report_md += ["", "## 美股 Top5"]
-    if us.empty:
-        report_md.append("- 今日无满足全部主+辅条件的美股标的")
+    report_md += ["", "## 港股 B档 Top5（主触发+量能，剩余按得分）"]
+    if hk_b.empty:
+        report_md.append("- 今日无满足B档条件的港股标的")
     else:
-        report_md += [to_line(r) for _, r in us.iterrows()]
+        report_md += [to_line(r) for _, r in hk_b.iterrows()]
+
+    report_md += ["", "## 美股 A档 Top5（主触发+量能+其余严格条件）"]
+    if us_a.empty:
+        report_md.append("- 今日无满足A档条件的美股标的")
+    else:
+        report_md += [to_line(r) for _, r in us_a.iterrows()]
+
+    report_md += ["", "## 美股 B档 Top5（主触发+量能，剩余按得分）"]
+    if us_b.empty:
+        report_md.append("- 今日无满足B档条件的美股标的")
+    else:
+        report_md += [to_line(r) for _, r in us_b.iterrows()]
 
     report_md += [
         "",
@@ -183,10 +208,14 @@ def main():
     report_file = BASE / "reports" / "daily" / f"{now}.md"
     report_file.write_text("\n".join(report_md), encoding="utf-8")
 
-    if not us.empty:
-        us.to_csv(BASE / "reports" / "daily" / f"{now}_us.csv", index=False)
-    if not hk.empty:
-        hk.to_csv(BASE / "reports" / "daily" / f"{now}_hk.csv", index=False)
+    if not us_a.empty:
+        us_a.to_csv(BASE / "reports" / "daily" / f"{now}_us_a.csv", index=False)
+    if not us_b.empty:
+        us_b.to_csv(BASE / "reports" / "daily" / f"{now}_us_b.csv", index=False)
+    if not hk_a.empty:
+        hk_a.to_csv(BASE / "reports" / "daily" / f"{now}_hk_a.csv", index=False)
+    if not hk_b.empty:
+        hk_b.to_csv(BASE / "reports" / "daily" / f"{now}_hk_b.csv", index=False)
 
     print(report_file)
 
