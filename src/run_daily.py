@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, List
+import math
 import yaml
 import pandas as pd
 import yfinance as yf
@@ -44,15 +46,74 @@ def fetch_ohlcv(symbol: str, period="18mo") -> pd.DataFrame:
     return out.dropna()
 
 
+def fetch_batch(symbols: List[str], period: str) -> Dict[str, pd.DataFrame]:
+    if not symbols:
+        return {}
+
+    raw = yf.download(
+        symbols,
+        period=period,
+        interval="1d",
+        auto_adjust=False,
+        progress=False,
+        threads=True,
+        group_by="ticker",
+    )
+    out: Dict[str, pd.DataFrame] = {}
+    if raw is None or raw.empty:
+        return out
+
+    # single ticker may return simple columns
+    if not isinstance(raw.columns, pd.MultiIndex):
+        cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in raw.columns]
+        if len(cols) == 5:
+            out[symbols[0]] = raw[cols].dropna()
+        return out
+
+    for sym in symbols:
+        try:
+            if sym not in raw.columns.get_level_values(0):
+                continue
+            part = raw[sym]
+            cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in part.columns]
+            if len(cols) < 5:
+                continue
+            out[sym] = part[cols].dropna()
+        except Exception:
+            continue
+    return out
+
+
+def select_liquid_symbols(symbols: List[str], top_n: int = 100, chunk_size: int = 150) -> List[str]:
+    rows = []
+    for i in range(0, len(symbols), chunk_size):
+        chunk = symbols[i : i + chunk_size]
+        data_map = fetch_batch(chunk, period="3mo")
+        for sym, df in data_map.items():
+            if len(df) < 25:
+                continue
+            dv = (df["Close"] * df["Volume"]).tail(20).mean()
+            if pd.isna(dv) or not math.isfinite(float(dv)):
+                continue
+            rows.append((sym, float(dv)))
+
+    if not rows:
+        return []
+    ranked = sorted(rows, key=lambda x: x[1], reverse=True)
+    return [s for s, _ in ranked[:top_n]]
+
+
 def run_market(market: str, symbols: list[str], cfg: dict):
     mcfg = cfg["markets"][market]
     scfg = cfg["strategy"]
     weights = cfg["scoring"]
 
     mkt_ok = market_trend_ok(mcfg["benchmark"])
-    rows = []
+    liquid_top_n = int(mcfg.get("liquidity_top_n", 100))
+    liquid_syms = select_liquid_symbols(symbols, top_n=liquid_top_n)
 
-    for sym in symbols:
+    rows = []
+    for sym in liquid_syms:
         try:
             df = fetch_ohlcv(sym)
             res = evaluate_symbol(df, mkt_ok=mkt_ok, cfg=scfg, weights=weights)
@@ -63,12 +124,12 @@ def run_market(market: str, symbols: list[str], cfg: dict):
             continue
 
     if not rows:
-        return pd.DataFrame()
+        return pd.DataFrame(), liquid_top_n, len(liquid_syms)
 
     out = pd.DataFrame(rows)
     out = out[(out["eligible"]) & (out["rule_1_breakout"]) & (out["rule_2_volume"]) & (out["rule_3_hold_above"]) & (out["rule_4_macd"])]
     out = out.sort_values(["score", "symbol"], ascending=[False, True]).head(mcfg["top_n"]).reset_index(drop=True)
-    return out
+    return out, liquid_top_n, len(liquid_syms)
 
 
 def to_line(r: pd.Series):
@@ -94,8 +155,8 @@ def main():
     us_symbols = get_us_universe(cfg["markets"]["us"]["max_symbols"])
     hk_symbols = get_hk_universe(cfg["markets"]["hk"]["max_symbols"])
 
-    us = run_market("us", us_symbols, cfg)
-    hk = run_market("hk", hk_symbols, cfg)
+    us, us_topn, us_used = run_market("us", us_symbols, cfg)
+    hk, hk_topn, hk_used = run_market("hk", hk_symbols, cfg)
 
     now = datetime.now().strftime("%Y-%m-%d")
     report_md = [f"# 【策略日报】{now} {cfg['report_time']}", "", "## 港股 Top5"]
@@ -115,6 +176,7 @@ def main():
         "## 备注",
         "- 数据源: yfinance（免费）",
         "- 美股使用上一个交易日收盘数据；港股使用上一个交易日收盘数据",
+        f"- 流动性预筛：按近20日平均成交额（ADV20）筛选，港股Top{hk_topn}（可用{hk_used}），美股Top{us_topn}（可用{us_used}）",
         "- 打分基于你的8条规则，满分100",
     ]
 

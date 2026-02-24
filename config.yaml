@@ -6,11 +6,13 @@ markets:
     benchmark: SPY
     sector_proxy: QQQ
     max_symbols: 2500
+    liquidity_top_n: 100
   hk:
     top_n: 5
     benchmark: 2800.HK
     sector_proxy: 2800.HK
     max_symbols: 2600
+    liquidity_top_n: 100
 strategy:
   short_channel: 20
   long_channel: 55
