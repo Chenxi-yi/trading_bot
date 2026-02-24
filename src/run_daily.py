@@ -113,36 +113,69 @@ def run_market(market: str, symbols: list[str], cfg: dict):
     liquid_syms = select_liquid_symbols(symbols, top_n=liquid_top_n)
 
     rows = []
+    fetch_ok = 0
+    insufficient_history = 0
+
     for sym in liquid_syms:
         try:
             df = fetch_ohlcv(sym)
+            if not df.empty:
+                fetch_ok += 1
             res = evaluate_symbol(df, mkt_ok=mkt_ok, cfg=scfg, weights=weights)
             if res is None:
+                insufficient_history += 1
                 continue
             rows.append({"symbol": sym, **res})
         except Exception:
             continue
 
     if not rows:
-        return pd.DataFrame(), pd.DataFrame(), liquid_top_n, len(liquid_syms)
+        diagnostics = {
+            "mkt_ok": mkt_ok,
+            "liquid_selected": len(liquid_syms),
+            "fetched_ok": fetch_ok,
+            "insufficient_history": insufficient_history,
+            "evaluated": 0,
+            "pass_r1": 0,
+            "pass_r2": 0,
+            "pass_r1r2": 0,
+            "pass_eligible": 0,
+            "a_pool": 0,
+            "b_pool": 0,
+        }
+        return pd.DataFrame(), pd.DataFrame(), liquid_top_n, len(liquid_syms), diagnostics
 
     out = pd.DataFrame(rows)
 
     # A档：保持严格版（原规则不变）
-    a_tier = out[
+    a_pool = out[
         (out["eligible"])
         & (out["rule_1_breakout"])
         & (out["rule_2_volume"])
         & (out["rule_3_hold_above"])
         & (out["rule_4_macd"])
-    ].sort_values(["score", "symbol"], ascending=[False, True]).head(mcfg["top_n"]).reset_index(drop=True)
+    ]
+    a_tier = a_pool.sort_values(["score", "symbol"], ascending=[False, True]).head(mcfg["top_n"]).reset_index(drop=True)
 
     # B档：必须满足 主触发 + 量能确认，其余按得分排序
-    b_tier = out[
-        (out["rule_1_breakout"]) & (out["rule_2_volume"])
-    ].sort_values(["score", "symbol"], ascending=[False, True]).head(mcfg["top_n"]).reset_index(drop=True)
+    b_pool_df = out[(out["rule_1_breakout"]) & (out["rule_2_volume"])]
+    b_tier = b_pool_df.sort_values(["score", "symbol"], ascending=[False, True]).head(mcfg["top_n"]).reset_index(drop=True)
 
-    return a_tier, b_tier, liquid_top_n, len(liquid_syms)
+    diagnostics = {
+        "mkt_ok": mkt_ok,
+        "liquid_selected": len(liquid_syms),
+        "fetched_ok": fetch_ok,
+        "insufficient_history": insufficient_history,
+        "evaluated": int(len(out)),
+        "pass_r1": int(out["rule_1_breakout"].sum()),
+        "pass_r2": int(out["rule_2_volume"].sum()),
+        "pass_r1r2": int(((out["rule_1_breakout"]) & (out["rule_2_volume"])).sum()),
+        "pass_eligible": int(out["eligible"].sum()),
+        "a_pool": int(len(a_pool)),
+        "b_pool": int(len(b_pool_df)),
+    }
+
+    return a_tier, b_tier, liquid_top_n, len(liquid_syms), diagnostics
 
 
 def to_line(r: pd.Series):
@@ -168,8 +201,8 @@ def main():
     us_symbols = get_us_universe(cfg["markets"]["us"]["max_symbols"])
     hk_symbols = get_hk_universe(cfg["markets"]["hk"]["max_symbols"])
 
-    us_a, us_b, us_topn, us_used = run_market("us", us_symbols, cfg)
-    hk_a, hk_b, hk_topn, hk_used = run_market("hk", hk_symbols, cfg)
+    us_a, us_b, us_topn, us_used, us_diag = run_market("us", us_symbols, cfg)
+    hk_a, hk_b, hk_topn, hk_used, hk_diag = run_market("hk", hk_symbols, cfg)
 
     now = datetime.now().strftime("%Y-%m-%d")
     report_md = [f"# 【策略日报】{now} {cfg['report_time']}", "", "## 港股 A档 Top5（主触发+量能+其余严格条件）"]
@@ -197,6 +230,10 @@ def main():
         report_md += [to_line(r) for _, r in us_b.iterrows()]
 
     report_md += [
+        "",
+        "## 数据检测点（用于排查为何无结果）",
+        f"- 港股：大盘同向={hk_diag['mkt_ok']} | 流动性入池={hk_diag['liquid_selected']} | 成功拉取={hk_diag['fetched_ok']} | 历史不足={hk_diag['insufficient_history']} | 参与评估={hk_diag['evaluated']} | 主触发通过={hk_diag['pass_r1']} | 量能通过={hk_diag['pass_r2']} | 主触发+量能={hk_diag['pass_r1r2']} | eligible通过={hk_diag['pass_eligible']} | A池={hk_diag['a_pool']} | B池={hk_diag['b_pool']}",
+        f"- 美股：大盘同向={us_diag['mkt_ok']} | 流动性入池={us_diag['liquid_selected']} | 成功拉取={us_diag['fetched_ok']} | 历史不足={us_diag['insufficient_history']} | 参与评估={us_diag['evaluated']} | 主触发通过={us_diag['pass_r1']} | 量能通过={us_diag['pass_r2']} | 主触发+量能={us_diag['pass_r1r2']} | eligible通过={us_diag['pass_eligible']} | A池={us_diag['a_pool']} | B池={us_diag['b_pool']}",
         "",
         "## 备注",
         "- 数据源: yfinance（免费）",
