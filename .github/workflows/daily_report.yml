@@ -1,6 +1,6 @@
 name: daily-report
 
-on:
+"on":
   schedule:
     - cron: '30 0 * * *' # 08:30 Asia/Shanghai
   workflow_dispatch:
