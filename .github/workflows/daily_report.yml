@@ -27,24 +27,5 @@ jobs:
           name: daily-report
           path: reports/daily/*
 
-      - name: Send to Discord webhook (optional)
-        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          latest=$(ls -t reports/daily/*.md | head -n 1)
-          content=$(python - <<'PY'
-from pathlib import Path
-import os
-p = sorted(Path('reports/daily').glob('*.md'))[-1]
-text = p.read_text(encoding='utf-8')
-print(text[:1800])
-PY
-)
-          payload=$(python - <<'PY'
-import json, os
-text = os.environ.get('CONTENT','')
-print(json.dumps({'content': text}))
-PY
-)
-          CONTENT="$content" curl -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"
+      - name: Note
+        run: echo "Daily report generated. Discord push can be added after webhook setup."
