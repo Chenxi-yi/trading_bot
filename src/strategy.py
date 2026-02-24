@@ -41,7 +41,8 @@ def evaluate_symbol(df: pd.DataFrame, mkt_ok: bool, cfg: dict, weights: dict):
 
     t, y = d.iloc[-1], d.iloc[-2]
 
-    r1 = (t["short_upper"] > t["long_upper"]) and (y["short_upper"] <= y["long_upper"])
+    # 主触发改为“状态满足”（短通道在长通道之上），不是仅限当天刚上穿
+    r1 = t["short_upper"] > t["long_upper"]
     r2 = (t["Volume"] > cfg["volume_ratio_threshold"] * t["vol20"]) or (
         y["Volume"] > cfg["volume_ratio_threshold"] * y["vol20"]
     )
