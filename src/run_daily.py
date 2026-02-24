@@ -17,21 +17,31 @@ def load_cfg():
         return yaml.safe_load(f)
 
 
+def _to_series(x):
+    if isinstance(x, pd.DataFrame):
+        return x.iloc[:, 0]
+    return x
+
+
 def market_trend_ok(benchmark: str, period="18mo") -> bool:
     df = yf.download(benchmark, period=period, interval="1d", auto_adjust=False, progress=False, threads=False)
     if df is None or df.empty or len(df) < 70:
         return False
-    close = df["Close"]
-    ma20 = close.rolling(20).mean().iloc[-1]
-    ma60 = close.rolling(60).mean().iloc[-1]
-    return bool((close.iloc[-1] > ma20) and (ma20 > ma60))
+    close = _to_series(df["Close"])
+    ma20 = _to_series(close.rolling(20).mean()).iloc[-1]
+    ma60 = _to_series(close.rolling(60).mean()).iloc[-1]
+    last = _to_series(close).iloc[-1]
+    return bool((float(last) > float(ma20)) and (float(ma20) > float(ma60)))
 
 
 def fetch_ohlcv(symbol: str, period="18mo") -> pd.DataFrame:
     df = yf.download(symbol, period=period, interval="1d", auto_adjust=False, progress=False, threads=False)
     if df is None or df.empty:
         return pd.DataFrame()
-    return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+    out = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+    if isinstance(out.columns, pd.MultiIndex):
+        out.columns = out.columns.get_level_values(0)
+    return out.dropna()
 
 
 def run_market(market: str, symbols: list[str], cfg: dict):
