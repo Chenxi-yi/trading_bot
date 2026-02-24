@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import StringIO
 from pathlib import Path
+from urllib.request import urlopen
 import pandas as pd
 
 NASDAQ_LISTED = "https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt"
@@ -10,9 +11,9 @@ HKEX_LIST = "https://www.hkex.com.hk/eng/services/trading/securities/securitiesl
 
 
 def _read_pipe_text_url(url: str) -> pd.DataFrame:
-    text = pd.read_csv(url, sep="\n", header=None).iloc[:, 0]
-    text = text[text.str.contains("\|")]
-    body = "\n".join(text.tolist())
+    raw = urlopen(url, timeout=20).read().decode("utf-8", errors="ignore")
+    lines = [ln for ln in raw.splitlines() if "|" in ln and not ln.startswith("File Creation Time")]
+    body = "\n".join(lines)
     return pd.read_csv(StringIO(body), sep="|")
 
 
