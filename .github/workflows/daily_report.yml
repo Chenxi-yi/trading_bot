@@ -1,0 +1,50 @@
+name: daily-report
+
+on:
+  schedule:
+    - cron: '30 0 * * *' # 08:30 Asia/Shanghai
+  workflow_dispatch:
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run daily report
+        run: python src/run_daily.py
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-report
+          path: reports/daily/*
+
+      - name: Send to Discord webhook (optional)
+        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          latest=$(ls -t reports/daily/*.md | head -n 1)
+          content=$(python - <<'PY'
+from pathlib import Path
+import os
+p = sorted(Path('reports/daily').glob('*.md'))[-1]
+text = p.read_text(encoding='utf-8')
+print(text[:1800])
+PY
+)
+          payload=$(python - <<'PY'
+import json, os
+text = os.environ.get('CONTENT','')
+print(json.dumps({'content': text}))
+PY
+)
+          CONTENT="$content" curl -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"

@@ -1,0 +1,32 @@
+timezone: Asia/Shanghai
+report_time: "08:30"
+markets:
+  us:
+    top_n: 5
+    benchmark: SPY
+    sector_proxy: QQQ
+    max_symbols: 2500
+  hk:
+    top_n: 5
+    benchmark: 2800.HK
+    sector_proxy: 2800.HK
+    max_symbols: 2600
+strategy:
+  short_channel: 20
+  long_channel: 55
+  volume_ratio_threshold: 1.5
+  atr_period: 14
+  atr_pct_min: 0.012
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  min_history_days: 220
+scoring:
+  rule_1_breakout: 25
+  rule_2_volume: 15
+  rule_3_hold_above: 15
+  rule_4_macd: 15
+  rule_5_atr_filter: 10
+  rule_6_trend_filter: 10
+  rule_7_not_fall_back: 5
+  rule_8_not_bear_cross_shrink: 5
